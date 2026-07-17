@@ -1,0 +1,124 @@
+databases:
+  - name: atria-postgres
+    plan: free
+    databaseName: atria_intake
+    user: atria
+
+services:
+  # Free Redis-compatible instance for BullMQ (email queue). Internal
+  # connections are unauthenticated by default and unreachable from the
+  # public internet — ipAllowList: [] is required syntax for that (see
+  # https://render.com/docs/blueprint-spec#render-key-value), not an
+  # oversight; the API only ever talks to this over Render's private
+  # network via REDIS_HOST/REDIS_PORT below.
+  - type: keyvalue
+    name: atria-redis
+    plan: free
+    ipAllowList: []
+
+  - type: web
+    name: atria-api
+    runtime: node
+    plan: free
+    region: oregon
+    # No rootDir: this is an npm-workspaces monorepo (apps/api depends on
+    # the workspace-local packages/shared package via "@atria/shared": "*",
+    # which only resolves when npm install runs from the repo root). Every
+    # command below is workspace-scoped instead of relying on a scoped
+    # build context.
+    buildCommand: npm install && npm run prisma:generate --workspace=apps/api && npm run build --workspace=apps/api
+    # nest build's inferred TS rootDir includes test/ alongside src/, so
+    # the compiled entrypoint lands at dist/src/main.js, not dist/main.js —
+    # verified against the actual build output, not assumed.
+    startCommand: node apps/api/dist/src/main.js
+    # Runs migrate deploy (non-interactive, safe to re-run) before every
+    # deploy goes live — covers the "run the Prisma migration against the
+    # new Render database" step automatically rather than as a manual step.
+    preDeployCommand: npm run prisma:deploy --workspace=apps/api
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render's default expected port is 10000 (see Port binding in
+      # Render's docs) — this app reads API_PORT, not Render's own PORT
+      # var, so it's set explicitly rather than relying on port-scanning.
+      - key: API_PORT
+        value: "10000"
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: atria-postgres
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: atria-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: atria-redis
+          property: port
+
+      # ── Auth: Clerk — real keys, prompted for during Blueprint creation
+      # (never stored in this file). Reuse the same values already in
+      # apps/api/.env locally; Render will ask for them once, in its own
+      # dashboard, not through me.
+      - key: AUTH_PROVIDER
+        value: clerk
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+      # ── Storage: S3 — intentionally deferred (step 5). STORAGE_BUCKET
+      # needs *some* value because env.validation.ts requires it to boot
+      # at all; the placeholder lets the app start with every non-document
+      # feature working, and document upload/download simply fails until
+      # real credentials replace these. Swap all four for real values once
+      # the bucket + IAM user exist — no code change needed either way.
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_REGION
+        value: us-east-1
+      - key: STORAGE_BUCKET
+        value: atria-intake-demo-placeholder
+      - key: STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_SECRET_ACCESS_KEY
+        sync: false
+      - key: STORAGE_FORCE_PATH_STYLE
+        value: "false"
+      - key: STORAGE_SIGNED_URL_TTL_SECONDS
+        value: "900"
+
+      # ── Email — defaults to stub (logs only, never sends) for the demo.
+      # Switch to mailhippo or gmail (see gmail-smtp-email.provider.ts) by
+      # changing EMAIL_PROVIDER and filling in the matching creds below.
+      - key: EMAIL_PROVIDER
+        value: stub
+      - key: MAILHIPPO_API_KEY
+        sync: false
+      - key: MAILHIPPO_FROM_ADDRESS
+        value: intake@atriawellness.com
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+
+      # ── AI summaries — optional, defaults to the free db_generated
+      # provider (no external calls, no key needed).
+      - key: AI_PROVIDER
+        value: db_generated
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # ── App URLs — placeholders. Update these to the real onrender.com
+      # and Vercel URLs once both deploys exist (see deployment step 4);
+      # a redeploy of this service picks up the change.
+      - key: API_URL
+        value: https://atria-api.onrender.com
+      - key: WEB_URL
+        value: https://placeholder.vercel.app
+      - key: INTAKE_LINK_BASE_URL
+        value: https://placeholder.vercel.app/intake
