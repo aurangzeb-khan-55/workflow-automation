@@ -84,6 +84,13 @@ export class EmailProcessor extends WorkerHost {
     if (!job) return;
 
     const maxAttempts = job.opts.attempts ?? 1;
+    // job.failedReason holds the message of the error thrown from process()
+    // above — the provider implementations never put secrets in that
+    // message, only host/status/generic failure text.
+    this.logger.error(
+      `Intake email attempt ${job.attemptsMade}/${maxAttempts} failed: notificationId=${job.data.notificationId} reason=${job.failedReason}`,
+    );
+
     if (job.attemptsMade < maxAttempts) {
       return;
     }
