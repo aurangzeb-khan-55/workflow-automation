@@ -1,8 +1,10 @@
 import { ConfigService } from "@nestjs/config";
 import { createTransport } from "nodemailer";
+import { promises as dns } from "dns";
 import { SmtpEmailProvider } from "./smtp-email.provider";
 
 jest.mock("nodemailer");
+jest.mock("dns", () => ({ promises: { resolve4: jest.fn() } }));
 
 describe("SmtpEmailProvider", () => {
   const PASSWORD = "super-secret-smtp-password-must-never-be-logged";
@@ -27,6 +29,7 @@ describe("SmtpEmailProvider", () => {
     stdoutSpy = jest.spyOn(process.stdout, "write").mockImplementation(() => true);
     stderrSpy = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
     jest.clearAllMocks();
+    (dns.resolve4 as jest.Mock).mockResolvedValue(["203.0.113.10"]);
   });
 
   afterEach(() => {
@@ -49,12 +52,13 @@ describe("SmtpEmailProvider", () => {
     });
 
     expect(result).toEqual({ providerMessageId: "<abc123@atriawell.com>", provider: "smtp" });
+    expect(dns.resolve4).toHaveBeenCalledWith("atriawell.com");
     expect(createTransport).toHaveBeenCalledWith({
-      host: "atriawell.com",
+      host: "203.0.113.10",
       port: 465,
       secure: true,
       auth: { user: "test@atriawell.com", pass: PASSWORD },
-      family: 4,
+      tls: { servername: "atriawell.com" },
     });
     expect(sendMail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -64,6 +68,22 @@ describe("SmtpEmailProvider", () => {
         html: "<p>Hi</p>",
       }),
     );
+  });
+
+  it("falls back to connecting by hostname when the SMTP host has no A record", async () => {
+    (dns.resolve4 as jest.Mock).mockRejectedValue(Object.assign(new Error("no A record"), { code: "ENODATA" }));
+    const sendMail = jest.fn().mockResolvedValue({ messageId: "<abc@atriawell.com>", rejected: [] });
+    (createTransport as jest.Mock).mockReturnValue({ sendMail });
+
+    const provider = new SmtpEmailProvider(makeConfig());
+    await provider.send({ to: "patient@example.com", subject: "s", html: "h" });
+
+    expect(createTransport).toHaveBeenCalledWith({
+      host: "atriawell.com",
+      port: 465,
+      secure: true,
+      auth: { user: "test@atriawell.com", pass: PASSWORD },
+    });
   });
 
   it("defaults the From address to the authenticated SMTP user when fromAddress isn't set", async () => {

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createTransport } from "nodemailer";
-import type SMTPTransport from "nodemailer/lib/smtp-transport";
+import { promises as dns } from "dns";
 import { EmailProvider, SendEmailInput, SendEmailResult } from "./email-provider.interface";
 
 /**
@@ -33,19 +33,33 @@ export class SmtpEmailProvider implements EmailProvider {
     // flag as spam — default to the authenticated account itself.
     const fromEmail = this.config.get<string>("email.fromAddress") || user;
 
-    // Render's outbound network doesn't route IPv6 (ENETUNREACH on the AAAA
-    // record Cloudflare-proxied hosts like atriawell.com return) — force
-    // IPv4 so the connection actually reaches the mail server. `family` is
-    // a real net.connect()/tls.connect() option nodemailer passes through,
-    // just not one @types/nodemailer declares.
-    const transportOptions: SMTPTransport.Options & { family?: number } = {
-      host,
+    // Render's outbound network doesn't route IPv6, but nodemailer's own DNS
+    // resolution looks up both A and AAAA records and picks one at random —
+    // a `family` option on the transport doesn't stop that, since by the
+    // time it would apply, `host` has already been rewritten to whichever
+    // resolved IP nodemailer picked. So resolve the A record ourselves and
+    // connect to that literal IPv4 address; `tls.servername` keeps SNI and
+    // certificate hostname validation pointed at the real hostname.
+    let connectHost = host;
+    let servername: string | undefined;
+    try {
+      const addresses = await dns.resolve4(host);
+      if (addresses[0]) {
+        connectHost = addresses[0];
+        servername = host;
+      }
+    } catch {
+      // No A record (e.g. an IPv6-only mail server) — fall back to letting
+      // nodemailer resolve the hostname itself.
+    }
+
+    const transporter = createTransport({
+      host: connectHost,
       port,
       secure: true,
       auth: { user, pass },
-      family: 4,
-    };
-    const transporter = createTransport(transportOptions);
+      ...(servername ? { tls: { servername } } : {}),
+    });
 
     let info: Awaited<ReturnType<typeof transporter.sendMail>>;
     try {
