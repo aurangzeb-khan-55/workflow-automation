@@ -78,24 +78,22 @@ services:
       - key: CLERK_SECRET_KEY
         sync: false
 
-      # ── Storage: S3 — intentionally deferred (step 5). STORAGE_BUCKET
-      # needs *some* value because env.validation.ts requires it to boot
-      # at all; the placeholder lets the app start with every non-document
-      # feature working, and document upload/download simply fails until
-      # real credentials replace these. Swap all four for real values once
-      # the bucket + IAM user exist — no code change needed either way.
+      # ── Storage: Cloudflare R2 (S3-compatible API, so STORAGE_PROVIDER
+      # stays "s3" — only the endpoint/region/path-style differ from AWS).
       - key: STORAGE_PROVIDER
         value: s3
+      - key: STORAGE_ENDPOINT
+        value: https://7081d14d159c0a0629f16d15c09f6aa7.r2.cloudflarestorage.com
       - key: STORAGE_REGION
-        value: us-east-1
+        value: auto
       - key: STORAGE_BUCKET
-        value: atria-intake-demo-placeholder
+        value: atria-wellness-intake-docs
       - key: STORAGE_ACCESS_KEY_ID
         sync: false
       - key: STORAGE_SECRET_ACCESS_KEY
         sync: false
       - key: STORAGE_FORCE_PATH_STYLE
-        value: "false"
+        value: "true"
       - key: STORAGE_SIGNED_URL_TTL_SECONDS
         value: "900"
 
