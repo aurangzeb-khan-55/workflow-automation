@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createTransport } from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { EmailProvider, SendEmailInput, SendEmailResult } from "./email-provider.interface";
 
 /**
@@ -32,12 +33,19 @@ export class SmtpEmailProvider implements EmailProvider {
     // flag as spam — default to the authenticated account itself.
     const fromEmail = this.config.get<string>("email.fromAddress") || user;
 
-    const transporter = createTransport({
+    // Render's outbound network doesn't route IPv6 (ENETUNREACH on the AAAA
+    // record Cloudflare-proxied hosts like atriawell.com return) — force
+    // IPv4 so the connection actually reaches the mail server. `family` is
+    // a real net.connect()/tls.connect() option nodemailer passes through,
+    // just not one @types/nodemailer declares.
+    const transportOptions: SMTPTransport.Options & { family?: number } = {
       host,
       port,
       secure: true,
       auth: { user, pass },
-    });
+      family: 4,
+    };
+    const transporter = createTransport(transportOptions);
 
     let info: Awaited<ReturnType<typeof transporter.sendMail>>;
     try {

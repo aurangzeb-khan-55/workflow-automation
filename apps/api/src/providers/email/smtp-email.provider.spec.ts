@@ -54,6 +54,7 @@ describe("SmtpEmailProvider", () => {
       port: 465,
       secure: true,
       auth: { user: "test@atriawell.com", pass: PASSWORD },
+      family: 4,
     });
     expect(sendMail).toHaveBeenCalledWith(
       expect.objectContaining({
