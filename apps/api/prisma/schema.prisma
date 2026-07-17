@@ -1,0 +1,366 @@
+// Atria Wellness Patient Intake Platform — multi-tenant data model.
+//
+// Tenant isolation: every clinical/business table carries `clinicId`.
+// All row-level queries in the application layer MUST be scoped by the
+// authenticated user's clinicId (see apps/api PrismaService tenant guard) —
+// this schema does not enforce it at the DB layer (Postgres RLS is a
+// candidate future hardening step, tracked but not required for V1).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  super_admin
+  clinic_admin
+  receptionist
+  medical_assistant
+  provider
+  read_only
+}
+
+enum NewOrExisting {
+  new
+  existing
+}
+
+enum IntakeStatus {
+  draft
+  intake_email_sent
+  email_failed
+  patient_started_intake
+  waiting_for_patient
+  missing_documents
+  intake_submitted
+  ready_for_staff_review
+  uploaded_to_jane
+  completed
+}
+
+enum IntakeSectionType {
+  personal_info
+  medical_history
+  insurance_info
+  consents
+}
+
+enum DocumentType {
+  insurance_card_front
+  insurance_card_back
+  drivers_license
+  referral
+  prior_record
+  mammogram
+  pap_smear
+  other
+}
+
+enum ConsentType {
+  consent_to_treat
+  hipaa_privacy_acknowledgement
+  financial_responsibility
+  telehealth_consent
+}
+
+enum SummarySource {
+  db_generated
+  ai_generated
+}
+
+enum NotificationRecipientType {
+  patient
+  staff
+}
+
+enum NotificationChannel {
+  email
+  sms
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Platform / tenancy
+// ─────────────────────────────────────────────────────────────────────────
+
+model Clinic {
+  id              String    @id @default(uuid())
+  name            String
+  slug            String    @unique
+  logoUrl         String?   @map("logo_url")
+  brandingConfig  Json      @default("{}") @map("branding_config")
+  settings        Json      @default("{}") @map("settings")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  users              User[]
+  patients           Patient[]
+  appointments       Appointment[]
+  intakes            Intake[]
+  documents          Document[]
+  notifications      Notification[]
+  staffNotifications StaffNotification[]
+  auditLogs          AuditLog[]
+
+  @@map("clinics")
+}
+
+model User {
+  id             String    @id @default(uuid())
+  clinicId       String    @map("clinic_id")
+  clerkUserId    String?   @unique @map("clerk_user_id")
+  name           String
+  email          String
+  role           UserRole  @default(receptionist)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  clinic         Clinic    @relation(fields: [clinicId], references: [id])
+  providerAppointments Appointment[] @relation("AppointmentProvider")
+  auditLogs      AuditLog[]
+
+  @@unique([clinicId, email])
+  @@index([clinicId])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Core clinical records
+// ─────────────────────────────────────────────────────────────────────────
+
+model Patient {
+  id                String    @id @default(uuid())
+  clinicId          String    @map("clinic_id")
+  firstName         String    @map("first_name")
+  lastName          String    @map("last_name")
+  dob               DateTime  @db.Date
+  phone             String
+  email             String
+  newOrExisting     NewOrExisting @map("new_or_existing")
+  preferredPharmacy String?   @map("preferred_pharmacy")
+  address           Json?
+  gender            String?
+  emergencyContact  Json?     @map("emergency_contact")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  clinic            Clinic    @relation(fields: [clinicId], references: [id])
+  appointments      Appointment[]
+  intakes           Intake[]
+
+  @@index([clinicId])
+  @@index([clinicId, lastName, firstName])
+  @@map("patients")
+}
+
+model Appointment {
+  id              String    @id @default(uuid())
+  clinicId        String    @map("clinic_id")
+  patientId       String    @map("patient_id")
+  providerId      String?   @map("provider_id")
+  reasonForVisit  String    @map("reason_for_visit")
+  scheduledAt     DateTime  @map("scheduled_at")
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  clinic          Clinic    @relation(fields: [clinicId], references: [id])
+  patient         Patient   @relation(fields: [patientId], references: [id])
+  provider        User?     @relation("AppointmentProvider", fields: [providerId], references: [id])
+  intakes         Intake[]
+
+  @@index([clinicId])
+  @@index([clinicId, scheduledAt])
+  @@map("appointments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Intake
+// ─────────────────────────────────────────────────────────────────────────
+
+model Intake {
+  id              String       @id @default(uuid())
+  clinicId        String       @map("clinic_id")
+  patientId       String       @map("patient_id")
+  appointmentId   String?      @map("appointment_id")
+  secureToken     String?      @unique @map("secure_token")
+  tokenExpiresAt  DateTime?    @map("token_expires_at")
+  status          IntakeStatus @default(draft)
+  requiredDocumentTypes DocumentType[] @default([]) @map("required_document_types")
+  requiredConsentTypes  ConsentType[]  @default([consent_to_treat, hipaa_privacy_acknowledgement, financial_responsibility]) @map("required_consent_types")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  submittedAt     DateTime?    @map("submitted_at")
+  reviewedAt      DateTime?    @map("reviewed_at")
+  uploadedToJaneAt DateTime?   @map("uploaded_to_jane_at")
+
+  clinic          Clinic       @relation(fields: [clinicId], references: [id])
+  patient         Patient      @relation(fields: [patientId], references: [id])
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id])
+  sections        IntakeSection[]
+  documents       Document[]
+  consents        Consent[]
+  summaries       IntakeSummary[]
+  notifications   Notification[]
+  staffNotifications StaffNotification[]
+
+  @@index([clinicId])
+  @@index([clinicId, status])
+  @@index([patientId])
+  @@map("intakes")
+}
+
+model IntakeSection {
+  id            String            @id @default(uuid())
+  intakeId      String            @map("intake_id")
+  sectionType   IntakeSectionType @map("section_type")
+  data          Json              @default("{}")
+  completedAt   DateTime?         @map("completed_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  intake        Intake            @relation(fields: [intakeId], references: [id])
+
+  @@unique([intakeId, sectionType])
+  @@index([intakeId])
+  @@map("intake_sections")
+}
+
+model Document {
+  id          String       @id @default(uuid())
+  clinicId    String       @map("clinic_id")
+  intakeId    String       @map("intake_id")
+  type        DocumentType
+  s3Key       String       @map("s3_key")
+  fileName    String       @map("file_name")
+  mimeType    String       @map("mime_type")
+  sizeBytes   Int          @map("size_bytes")
+  uploadedAt  DateTime     @default(now()) @map("uploaded_at")
+  deletedAt   DateTime?    @map("deleted_at")
+
+  clinic      Clinic       @relation(fields: [clinicId], references: [id])
+  intake      Intake       @relation(fields: [intakeId], references: [id])
+
+  @@index([clinicId])
+  @@index([intakeId])
+  @@map("documents")
+}
+
+model Consent {
+  id             String      @id @default(uuid())
+  intakeId       String      @map("intake_id")
+  type           ConsentType
+  signedAt       DateTime    @map("signed_at")
+  signatureData  String      @map("signature_data") @db.Text
+  ipAddress      String      @map("ip_address")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  intake         Intake      @relation(fields: [intakeId], references: [id])
+
+  @@unique([intakeId, type])
+  @@index([intakeId])
+  @@map("consents")
+}
+
+model IntakeSummary {
+  id           String         @id @default(uuid())
+  intakeId     String         @map("intake_id")
+  summaryText  String         @map("ai_summary_text") @db.Text
+  missingItems Json           @default("[]") @map("missing_items")
+  source       SummarySource  @default(db_generated)
+  generatedAt  DateTime       @default(now()) @map("generated_at")
+
+  intake       Intake         @relation(fields: [intakeId], references: [id])
+
+  @@index([intakeId])
+  @@map("intake_summaries")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Notifications & audit
+// ─────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id            String                    @id @default(uuid())
+  clinicId      String                    @map("clinic_id")
+  intakeId      String?                   @map("intake_id")
+  recipientType NotificationRecipientType @map("recipient_type")
+  channel       NotificationChannel
+  provider      String
+  status        NotificationStatus        @default(queued)
+  reason        String
+  sentAt        DateTime?                 @map("sent_at")
+  createdAt     DateTime                  @default(now()) @map("created_at")
+
+  clinic        Clinic                    @relation(fields: [clinicId], references: [id])
+  intake        Intake?                   @relation(fields: [intakeId], references: [id])
+
+  @@index([clinicId])
+  @@index([intakeId])
+  @@map("notifications")
+}
+
+// In-app staff alerts — a distinct concept from Notification above, which
+// tracks outbound email delivery to patients (channel/provider/sentAt).
+// This is a read/unread UI feed for staff, shared clinic-wide (not
+// per-user): `readAt` is a single shared timestamp, so one staff member
+// reading a notification marks it read for the whole clinic, matching "any
+// staff member there can see it" rather than tracking per-user read state.
+model StaffNotification {
+  id        String    @id @default(uuid())
+  clinicId  String    @map("clinic_id")
+  intakeId  String?   @map("intake_id")
+  message   String
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  clinic    Clinic    @relation(fields: [clinicId], references: [id])
+  intake    Intake?   @relation(fields: [intakeId], references: [id])
+
+  @@index([clinicId])
+  @@index([clinicId, readAt])
+  @@index([intakeId])
+  @@map("staff_notifications")
+}
+
+model AuditLog {
+  id             String    @id @default(uuid())
+  clinicId       String    @map("clinic_id")
+  userId         String?   @map("user_id")
+  patientId      String?   @map("patient_id")
+  entity         String
+  entityId       String    @map("entity_id")
+  action         String
+  previousValue  Json?     @map("previous_value")
+  newValue       Json?     @map("new_value")
+  ipAddress      String?   @map("ip_address")
+  device         String?
+  browser        String?
+  timestamp      DateTime  @default(now())
+
+  clinic         Clinic    @relation(fields: [clinicId], references: [id])
+  user           User?     @relation(fields: [userId], references: [id])
+
+  @@index([clinicId])
+  @@index([clinicId, entity, entityId])
+  @@index([patientId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
