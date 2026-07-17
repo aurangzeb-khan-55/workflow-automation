@@ -124,7 +124,7 @@ services:
       # and Vercel URLs once both deploys exist (see deployment step 4);
       # a redeploy of this service picks up the change.
       - key: API_URL
-        value: https://atria-api.onrender.com
+        value: https://atria-api-n9qj.onrender.com
       - key: WEB_URL
         value: https://placeholder.vercel.app
       - key: INTAKE_LINK_BASE_URL
