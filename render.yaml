@@ -99,18 +99,20 @@ services:
       - key: STORAGE_SIGNED_URL_TTL_SECONDS
         value: "900"
 
-      # ── Email — defaults to stub (logs only, never sends) for the demo.
-      # Switch to mailhippo or gmail (see gmail-smtp-email.provider.ts) by
-      # changing EMAIL_PROVIDER and filling in the matching creds below.
+      # ── Email — generic SMTP via the client's cPanel-hosted mailbox.
       - key: EMAIL_PROVIDER
-        value: stub
+        value: smtp
       - key: MAILHIPPO_API_KEY
         sync: false
-      - key: MAILHIPPO_FROM_ADDRESS
-        value: intake@atriawellness.com
-      - key: GMAIL_USER
-        sync: false
-      - key: GMAIL_APP_PASSWORD
+      - key: EMAIL_FROM_ADDRESS
+        value: test@atriawell.com
+      - key: SMTP_HOST
+        value: atriawell.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USER
+        value: test@atriawell.com
+      - key: SMTP_PASSWORD
         sync: false
 
       # ── AI summaries — optional, defaults to the free db_generated

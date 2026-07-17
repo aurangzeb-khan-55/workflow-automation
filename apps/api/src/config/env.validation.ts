@@ -25,8 +25,8 @@ class EnvironmentVariables {
   @IsIn(["stub", "clerk"])
   AUTH_PROVIDER!: string;
 
-  // "gmail" is a TEMPORARY testing option — see gmail-smtp-email.provider.ts.
-  @IsIn(["stub", "mailhippo", "gmail"])
+  // "smtp" is a generic SMTP option — see smtp-email.provider.ts.
+  @IsIn(["stub", "mailhippo", "smtp"])
   EMAIL_PROVIDER!: string;
 
   @IsIn(["s3"])

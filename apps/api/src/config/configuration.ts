@@ -33,10 +33,13 @@ export default () => ({
   email: {
     provider: process.env.EMAIL_PROVIDER ?? "stub",
     mailhippoApiKey: process.env.MAILHIPPO_API_KEY,
-    fromAddress: process.env.MAILHIPPO_FROM_ADDRESS ?? "intake@atriawellness.com",
-    // TEMPORARY: for EMAIL_PROVIDER=gmail only — see gmail-smtp-email.provider.ts.
-    gmailUser: process.env.GMAIL_USER,
-    gmailAppPassword: process.env.GMAIL_APP_PASSWORD,
+    fromAddress: process.env.EMAIL_FROM_ADDRESS ?? "intake@atriawellness.com",
+    // For EMAIL_PROVIDER=smtp only — see smtp-email.provider.ts. Generic:
+    // works against any standard mail server, not tied to one host.
+    smtpHost: process.env.SMTP_HOST,
+    smtpPort: parseInt(process.env.SMTP_PORT ?? "465", 10),
+    smtpUser: process.env.SMTP_USER,
+    smtpPassword: process.env.SMTP_PASSWORD,
   },
 
   ai: {
