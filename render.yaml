@@ -99,13 +99,17 @@ services:
       - key: STORAGE_SIGNED_URL_TTL_SECONDS
         value: "900"
 
-      # ── Email — generic SMTP via the client's cPanel-hosted mailbox.
+      # ── Email — MailHippo (HTTPS API). Raw SMTP (465/587) doesn't work
+      # from Render's free-tier network — outbound connections on those
+      # ports are blocked at the network layer regardless of destination.
       - key: EMAIL_PROVIDER
-        value: smtp
+        value: mailhippo
       - key: MAILHIPPO_API_KEY
         sync: false
       - key: EMAIL_FROM_ADDRESS
         value: test@atriawell.com
+      # SMTP_* kept for local/non-Render use of SmtpEmailProvider — inert
+      # while EMAIL_PROVIDER=mailhippo.
       - key: SMTP_HOST
         value: atriawell.com
       - key: SMTP_PORT
