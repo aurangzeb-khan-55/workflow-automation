@@ -31,7 +31,13 @@ services:
     # single instance, so there's no rolling-deploy race to avoid by
     # separating it out — running it here is equivalent, and
     # `migrate deploy` is safe to re-run on every build regardless.
-    buildCommand: npm install && npm run prisma:generate --workspace=apps/api && npm run build --workspace=apps/api && npm run prisma:deploy --workspace=apps/api
+    # --include=dev: Render skips devDependencies during install whenever
+    # NODE_ENV=production is set (standard platform behavior, not an npm
+    # default). @nestjs/cli — which provides the `nest` binary `nest
+    # build` needs — lives in devDependencies, so the plain install left
+    # it missing (`nest: not found`). This forces it in at build time
+    # while NODE_ENV=production still applies at runtime.
+    buildCommand: npm install --include=dev && npm run prisma:generate --workspace=apps/api && npm run build --workspace=apps/api && npm run prisma:deploy --workspace=apps/api
     # nest build's inferred TS rootDir includes test/ alongside src/, so
     # the compiled entrypoint lands at dist/src/main.js, not dist/main.js —
     # verified against the actual build output, not assumed.
