@@ -26,15 +26,16 @@ services:
     # which only resolves when npm install runs from the repo root). Every
     # command below is workspace-scoped instead of relying on a scoped
     # build context.
-    buildCommand: npm install && npm run prisma:generate --workspace=apps/api && npm run build --workspace=apps/api
+    # preDeployCommand isn't available on the free plan, so the migration
+    # runs as the last build step instead. Free tier only ever runs a
+    # single instance, so there's no rolling-deploy race to avoid by
+    # separating it out — running it here is equivalent, and
+    # `migrate deploy` is safe to re-run on every build regardless.
+    buildCommand: npm install && npm run prisma:generate --workspace=apps/api && npm run build --workspace=apps/api && npm run prisma:deploy --workspace=apps/api
     # nest build's inferred TS rootDir includes test/ alongside src/, so
     # the compiled entrypoint lands at dist/src/main.js, not dist/main.js —
     # verified against the actual build output, not assumed.
     startCommand: node apps/api/dist/src/main.js
-    # Runs migrate deploy (non-interactive, safe to re-run) before every
-    # deploy goes live — covers the "run the Prisma migration against the
-    # new Render database" step automatically rather than as a manual step.
-    preDeployCommand: npm run prisma:deploy --workspace=apps/api
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
