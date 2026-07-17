@@ -48,7 +48,6 @@ export class S3StorageProvider implements StorageProvider {
         Key: input.key,
         Body: input.body,
         ContentType: input.contentType,
-        ServerSideEncryption: "AES256",
       }),
     );
     return { key: input.key };
@@ -63,11 +62,16 @@ export class S3StorageProvider implements StorageProvider {
 
   async getSignedUploadUrl(key: string, contentType: string, expiresInSeconds?: number): Promise<string> {
     const ttl = expiresInSeconds ?? this.config.get<number>("storage.signedUrlTtlSeconds") ?? 900;
-    return getSignedUrl(
-      this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType, ServerSideEncryption: "AES256" }),
-      { expiresIn: ttl },
-    );
+    // No ServerSideEncryption here: setting it makes x-amz-server-side-
+    // encryption part of the signed request, which a plain browser
+    // `fetch(uploadUrl, { method: "PUT", body: file })` never sends —
+    // same signature-mismatch trap as the checksum header above. Bucket-
+    // level default encryption (set on the bucket itself) covers
+    // encryption-at-rest without needing this per-request header, and R2
+    // doesn't honor it the way S3 does anyway.
+    return getSignedUrl(this.client, new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }), {
+      expiresIn: ttl,
+    });
   }
 
   async deleteObject(key: string): Promise<void> {
